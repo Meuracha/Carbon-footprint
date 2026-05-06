@@ -1,0 +1,70 @@
+version: 2
+
+sources:
+  - name: carbon_raw
+    description: "Raw tables ingested by Airflow DAGs"
+    database: carbondb
+    schema: public
+    tables:
+      - name: raw_sensor_readings
+        description: "Sensor data จาก kiln pipeline (Scope 1 sources)"
+        freshness:
+          warn_after: {count: 2, period: day}
+          error_after: {count: 5, period: day}
+        loaded_at_field: ingested_at
+        columns:
+          - name: reading_date
+            tests: [not_null]
+          - name: plant_id
+            tests: [not_null]
+          - name: sensor
+            tests: [not_null]
+          - name: value
+            tests: [not_null]
+
+      - name: raw_owid_emissions
+        description: "Our World in Data — CO2 emissions by country"
+        columns:
+          - name: year
+            tests: [not_null]
+          - name: country
+            tests: [not_null]
+
+      - name: raw_iea_benchmarks
+        description: "IEA cement sector benchmarks"
+        columns:
+          - name: year
+            tests: [not_null]
+          - name: sector
+            tests: [not_null]
+          - name: metric
+            tests: [not_null]
+
+      - name: raw_openaq_readings
+        description: "OpenAQ air quality measurements near Rayong"
+
+models:
+  - name: stg_sensor_readings
+    description: "Clean sensor readings พร้อม CO2 unit conversion"
+    columns:
+      - name: reading_date
+        tests: [not_null]
+      - name: plant_id
+        tests: [not_null]
+      - name: sensor
+        tests: [not_null]
+
+  - name: mart_co2_intensity
+    description: "CO2 intensity per tonne of cement (Scope 1+2+3)"
+    columns:
+      - name: reading_date
+        tests: [not_null]
+      - name: scope1_kg_per_t
+        tests:
+          - not_null
+
+  - name: mart_net_zero_progress
+    description: "Progress toward SCG Net Zero 2050 target"
+
+  - name: mart_benchmark_gap
+    description: "Gap vs IEA global/ASEAN/Thailand benchmarks"

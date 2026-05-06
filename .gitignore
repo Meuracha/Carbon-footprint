@@ -1,0 +1,31 @@
+# ─── Credentials (ห้าม push เด็ดขาด) ────────────────────────
+.env
+
+# ─── Python ───────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.Python
+venv/
+.venv/
+
+# ─── dbt ──────────────────────────────────────────────────────
+dbt_carbon/target/
+dbt_carbon/dbt_packages/
+dbt_carbon/logs/
+dvt_carbon/profile.yml
+
+# ─── Data & exports ───────────────────────────────────────────
+exports/*.parquet
+exports/*.csv
+
+# ─── Airflow logs ─────────────────────────────────────────────
+logs/
+
+# ─── OS ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── IDE ──────────────────────────────────────────────────────
+.vscode/
+.idea/

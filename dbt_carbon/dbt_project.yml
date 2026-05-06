@@ -1,0 +1,39 @@
+name: "carbon_footprint"
+version: "1.0.0"
+config-version: 2
+
+profile: "carbon_footprint"
+
+model-paths:  ["models"]
+test-paths:   ["tests"]
+seed-paths:   ["seeds"]
+macro-paths:  ["macros"]
+target-path:  "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  carbon_footprint:
+
+    staging:
+      +materialized: view       # staging เป็น view เสมอ (ประหยัด storage)
+      +schema: staging
+
+    intermediate:
+      +materialized: table      # intermediate เป็น table (query เร็ว)
+      +schema: intermediate
+
+    marts:
+      +materialized: table      # mart เป็น table (dashboard query เร็ว)
+      +schema: marts
+
+vars:
+  # SCG Net Zero targets
+  net_zero_baseline_intensity: 800    # kg CO2/t-cement (baseline 2020)
+  net_zero_target_2030: 650           # kg CO2/t-cement
+  net_zero_target_2050: 0             # net zero
+
+  # IEA global average (cement sector)
+  iea_global_avg_intensity: 620       # kg CO2/t-cement (2022)
+
+  # Plant config
+  plant_id: "SCG_RAYONG_01"

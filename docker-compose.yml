@@ -1,0 +1,171 @@
+# ─────────────────────────────────────────────────────────────
+#  Carbon Footprint Tracking Platform — SCG Net Zero 2050
+#  docker compose up -d  →  ทุก service รันอัตโนมัติ
+#
+#  Services:
+#    postgres   — raw + transformed data storage
+#    airflow    — batch orchestration (3 DAGs)
+#    dashboard  — Streamlit Net Zero KPI tracker
+# ─────────────────────────────────────────────────────────────
+
+x-airflow-common: &airflow-common
+  env_file: .env
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_USER}:${AIRFLOW_PASS}@postgres-airflow/${AIRFLOW_DB}
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    PYTHONPATH: /opt/airflow
+    # DB เก็บ sensor + carbon data
+    CARBON_DB_HOST: postgres-carbon
+    CARBON_DB_NAME: ${CARBON_DB_NAME}
+    CARBON_DB_USER: ${CARBON_DB_USER}
+    CARBON_DB_PASS: ${CARBON_DB_PASS}
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./dbt_carbon:/opt/airflow/dbt_carbon
+    - ./exports:/opt/airflow/exports
+    - ./logs:/opt/airflow/logs
+    - airflow_plugins:/opt/airflow/plugins
+  depends_on:
+    postgres-airflow:
+      condition: service_healthy
+  networks:
+    - carbon_net
+
+services:
+
+  # ═══════════════════════════════════════════════════════════
+  #  1. POSTGRESQL — Airflow metadata
+  # ═══════════════════════════════════════════════════════════
+  postgres-airflow:
+    image: postgres:15
+    container_name: carbon_postgres_airflow
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${AIRFLOW_DB}
+      POSTGRES_USER: ${AIRFLOW_USER}
+      POSTGRES_PASSWORD: ${AIRFLOW_PASS}
+    networks:
+      - carbon_net
+    volumes:
+      - airflow_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${AIRFLOW_USER} -d $${AIRFLOW_DB}"]
+      interval: 5s
+      retries: 10
+
+  # ═══════════════════════════════════════════════════════════
+  #  2. POSTGRESQL — Carbon data storage
+  # ═══════════════════════════════════════════════════════════
+  postgres-carbon:
+    image: postgres:15
+    container_name: carbon_postgres
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${CARBON_DB_NAME}
+      POSTGRES_USER: ${CARBON_DB_USER}
+      POSTGRES_PASSWORD: ${CARBON_DB_PASS}
+    ports:
+      - "5433:5432"
+    networks:
+      - carbon_net
+    volumes:
+      - ./init-db:/docker-entrypoint-initdb.d
+      - carbon_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${CARBON_DB_USER} -d $${CARBON_DB_NAME}"]
+      interval: 5s
+      retries: 10
+
+  # ═══════════════════════════════════════════════════════════
+  #  3. AIRFLOW — init DB + create admin user
+  # ═══════════════════════════════════════════════════════════
+  airflow-init:
+    <<: *airflow-common
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: carbon_airflow_init
+    command: >
+      bash -c "
+        airflow db upgrade &&
+        airflow users create --username $${AIRFLOW_ADMIN_USER} --password $${AIRFLOW_ADMIN_PASS} --firstname SCG --lastname Carbon --role Admin --email $${AIRFLOW_ADMIN_EMAIL}"
+    restart: "no"
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+
+  # ═══════════════════════════════════════════════════════════
+  #  4. AIRFLOW — webserver UI
+  # ═══════════════════════════════════════════════════════════
+  airflow-webserver:
+    <<: *airflow-common
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: carbon_airflow_web
+    command: webserver --workers 2
+    ports:
+      - "8080:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 10
+      start_period: 120s
+
+  # ═══════════════════════════════════════════════════════════
+  #  5. AIRFLOW — scheduler
+  # ═══════════════════════════════════════════════════════════
+  airflow-scheduler:
+    <<: *airflow-common
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: carbon_airflow_scheduler
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ═══════════════════════════════════════════════════════════
+  #  6. STREAMLIT — Net Zero KPI dashboard
+  # ═══════════════════════════════════════════════════════════
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: carbon_dashboard
+    env_file: .env
+    ports:
+      - "8501:8501"
+    networks:
+      - carbon_net
+    environment:
+      CARBON_DB_HOST: postgres-carbon
+      CARBON_DB_NAME: ${CARBON_DB_NAME}
+      CARBON_DB_USER: ${CARBON_DB_USER}
+      CARBON_DB_PASS: ${CARBON_DB_PASS}
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      postgres-carbon:
+        condition: service_healthy
+    command: >
+      streamlit run /app/dashboard/app.py
+      --server.port=8501
+      --server.address=0.0.0.0
+      --server.headless=true
+
+networks:
+  carbon_net:
+    driver: bridge
+
+volumes:
+  airflow_db:
+  airflow_plugins:
+  carbon_db:
